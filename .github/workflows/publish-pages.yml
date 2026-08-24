@@ -1,0 +1,91 @@
+name: Publish portfolio to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Snapshot the published ChatGPT Site
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE='https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/'
+          HOST='christopher-palasz-portfolio.chrispalasz.chatgpt.site'
+          rm -rf _site snapshot
+          mkdir -p snapshot
+          wget \
+            --recursive \
+            --level=5 \
+            --page-requisites \
+            --convert-links \
+            --adjust-extension \
+            --no-parent \
+            --domains="$HOST" \
+            --directory-prefix=snapshot \
+            "$SOURCE"
+          cp -a "snapshot/$HOST/." _site/
+          touch _site/.nojekyll
+          echo "Snapshot files:"
+          find _site -maxdepth 3 -type f | sort
+
+      - name: Protect phone-free public resume
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RIlE '\(630\)[[:space:]-]*430[[:space:]-]*4252|630[[:space:]-]*430[[:space:]-]*4252' _site >/dev/null 2>&1; then
+            echo 'A private phone number was detected in the mirrored site. Deployment stopped.' >&2
+            exit 1
+          fi
+
+      - name: Preserve mirrored site in repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s dotglob nullglob
+          for item in _site/*; do
+            base="$(basename "$item")"
+            if [[ "$base" != '.github' ]]; then
+              rm -rf -- "$base"
+              cp -a -- "$item" "$base"
+            fi
+          done
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish portfolio snapshot'
+            git push origin HEAD:main
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
