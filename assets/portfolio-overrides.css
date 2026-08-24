@@ -1,0 +1,74 @@
+/* Custom portfolio presentation overrides. */
+
+/* Keep the name on one line while preserving room for the portrait. */
+.hero-grid {
+  gap: clamp(3rem, 4vw, 4rem);
+}
+
+.hero h1 {
+  white-space: nowrap;
+  font-size: clamp(3.2rem, 4.3vw, 4.1rem);
+}
+
+/* Treat all four portfolio samples equally in a compact 2 x 2 grid. */
+.project-grid {
+  grid-auto-rows: 1fr;
+}
+
+.project-card,
+.project-card.featured {
+  grid-column: auto;
+  grid-template-columns: none;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.project-image-link {
+  min-height: 0;
+}
+
+.project-image-frame,
+.project-card.featured .project-image-frame {
+  height: 230px;
+  min-height: 0;
+}
+
+.project-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 1.55rem 1.75rem 1.75rem;
+}
+
+.project-card h3,
+.project-card:not(.featured) h3 {
+  font-size: clamp(1.45rem, 2vw, 2rem);
+}
+
+.tag-list {
+  margin: 1rem 0 1.2rem;
+}
+
+.text-link {
+  margin-top: auto;
+}
+
+@media (max-width: 900px) {
+  .hero h1 {
+    font-size: clamp(2.8rem, 7.2vw, 4rem);
+  }
+}
+
+@media (max-width: 660px) {
+  .hero h1 {
+    white-space: nowrap;
+    font-size: clamp(1.85rem, 8.5vw, 3rem);
+  }
+
+  .project-image-frame,
+  .project-card.featured .project-image-frame {
+    height: 230px;
+    min-height: 0;
+  }
+}
