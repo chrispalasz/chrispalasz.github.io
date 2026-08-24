@@ -1,0 +1,1 @@
+Trigger independent portfolio capture from the now-public ChatGPT Sites source.
