@@ -1,13 +1,7 @@
-name: Publish portfolio to GitHub Pages
+name: USE THIS - Deploy Independent GitHub Portfolio
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-  issues:
-    types: [opened]
-  pull_request:
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -20,10 +14,6 @@ concurrency:
 
 jobs:
   publish:
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      (github.event_name != 'issues' || github.event.issue.title == 'Trigger portfolio deployment') &&
-      (github.event_name != 'pull_request' || github.head_ref == 'portfolio-deploy-trigger')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -72,8 +62,6 @@ jobs:
             curl -fL -A 'Mozilla/5.0' --retry 3 --retry-delay 2 "$SOURCE" -o _site/index.html
           fi
 
-          # Do not allow a redirect-only result. The GitHub copy must contain the
-          # portfolio page itself and must not depend on ChatGPT for navigation.
           if grep -Eqi 'http-equiv=["'"']refresh|location\.(href|replace)|window\.location' _site/index.html; then
             echo 'Captured index appears to redirect instead of containing the portfolio.' >&2
             exit 1
