@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
   issues:
     types: [opened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -18,15 +20,20 @@ concurrency:
 
 jobs:
   publish:
-    if: github.actor != 'github-actions[bot]' && (github.event_name != 'issues' || github.event.issue.title == 'Trigger portfolio deployment')
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name != 'issues' || github.event.issue.title == 'Trigger portfolio deployment') &&
+      (github.event_name != 'pull_request' || github.head_ref == 'portfolio-deploy-trigger')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Check out repository
+      - name: Check out main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -36,20 +43,21 @@ jobs:
       - name: Capture the published portfolio
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           SOURCE='https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/'
           HOST='christopher-palasz-portfolio.chrispalasz.chatgpt.site'
           rm -rf _site mirror
           mkdir -p _site mirror
 
-          # First attempt: mirror the existing published site and same-host assets.
           wget \
             --recursive \
-            --level=5 \
+            --level=6 \
             --page-requisites \
             --convert-links \
             --adjust-extension \
             --no-parent \
+            --span-hosts \
+            --domains="$HOST,cdn.openai.com,files.oaiusercontent.com,chatgpt.com" \
             --user-agent='Mozilla/5.0' \
             --directory-prefix=mirror \
             "$SOURCE" || true
@@ -60,60 +68,21 @@ jobs:
             cp -a "$ROOT/." _site/
           fi
 
-          # Fallback: preserve the live HTML and resolve relative resources against
-          # the original published site. This prevents a failed mirror from leaving
-          # GitHub Pages with no index file.
           if [[ ! -s _site/index.html ]]; then
-            curl -fL \
-              -A 'Mozilla/5.0' \
-              --retry 3 \
-              --retry-delay 2 \
-              "$SOURCE" \
-              -o _site/index.html || true
-
-            if [[ -s _site/index.html ]]; then
-              python3 - <<'PY'
-from pathlib import Path
-p = Path('_site/index.html')
-s = p.read_text(encoding='utf-8', errors='ignore')
-base = '<base href="https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/">'
-if '<base ' not in s.lower():
-    lower = s.lower()
-    pos = lower.find('<head>')
-    if pos >= 0:
-        pos += len('<head>')
-        s = s[:pos] + base + s[pos:]
-    else:
-        s = base + s
-p.write_text(s, encoding='utf-8')
-PY
-            fi
+            curl -fL -A 'Mozilla/5.0' --retry 3 --retry-delay 2 "$SOURCE" -o _site/index.html
           fi
 
-          # Last-resort continuity page. The GitHub URL will still resolve to the
-          # existing portfolio rather than returning a 404.
-          if [[ ! -s _site/index.html ]]; then
-            cat > _site/index.html <<'HTML'
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/">
-  <title>Christopher Palasz | Instructional Design Portfolio</title>
-  <link rel="canonical" href="https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/">
-</head>
-<body>
-  <p><a href="https://christopher-palasz-portfolio.chrispalasz.chatgpt.site/">Open Christopher Palasz's portfolio</a></p>
-</body>
-</html>
-HTML
+          # Do not allow a redirect-only result. The GitHub copy must contain the
+          # portfolio page itself and must not depend on ChatGPT for navigation.
+          if grep -Eqi 'http-equiv=["'"']refresh|location\.(href|replace)|window\.location' _site/index.html; then
+            echo 'Captured index appears to redirect instead of containing the portfolio.' >&2
+            exit 1
           fi
 
           touch _site/.nojekyll
           test -s _site/index.html
           echo 'Captured files:'
-          find _site -maxdepth 3 -type f | sort
+          find _site -maxdepth 4 -type f | sort
 
       - name: Verify public copy remains phone-free
         shell: bash
@@ -125,10 +94,8 @@ import zipfile
 from pathlib import Path
 
 phone = re.compile(r'(?<!\d)(?:\+?1[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]\d{3}[ .-]\d{4}(?!\d)')
-root = Path('_site')
 violations = []
-
-for p in root.rglob('*'):
+for p in Path('_site').rglob('*'):
     if not p.is_file():
         continue
     name = p.name.lower()
@@ -144,11 +111,9 @@ for p in root.rglob('*'):
         continue
     if text and phone.search(text):
         violations.append(str(p))
-
 if violations:
     print('A phone number was detected in public-facing site content:')
-    for v in violations:
-        print(v)
+    print('\n'.join(violations))
     raise SystemExit(1)
 PY
 
@@ -167,7 +132,7 @@ PY
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m 'Publish portfolio snapshot'
+            git commit -m 'Publish independent portfolio snapshot'
             git push origin HEAD:main
           fi
 
