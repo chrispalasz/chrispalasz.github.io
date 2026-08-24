@@ -5,7 +5,7 @@ import re
 import sys
 from collections import deque
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import parse_qs, urldefrag, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -46,6 +46,17 @@ def clean_url(raw: str, base: str) -> str | None:
     return absolute
 
 
+def unwrap_image_optimizer(url: str) -> str | None:
+    """Convert ChatGPT Sites/Vinext optimized-image URLs back to source image URLs."""
+    p = urlparse(url)
+    if p.netloc == SOURCE_HOST and p.path == "/_vinext/image":
+        raw = parse_qs(p.query).get("url", [None])[0]
+        if raw:
+            return urljoin(SOURCE, raw)
+        return None
+    return url
+
+
 def local_web_path(url: str, content_type: str = "") -> str:
     p = urlparse(url)
     path = p.path or "/"
@@ -84,6 +95,13 @@ def rewrite_ref(url: str, base: str, kind: str) -> str:
     absolute = clean_url(url, base)
     if not absolute:
         return url
+
+    if kind == "asset":
+        normalized = unwrap_image_optimizer(absolute)
+        if normalized is None:
+            return url
+        absolute = normalized
+
     p = urlparse(absolute)
     if p.netloc == SOURCE_HOST:
         if kind == "page":
@@ -104,6 +122,16 @@ def rewrite_ref(url: str, base: str, kind: str) -> str:
     return absolute
 
 
+def rewrite_srcset(value: str, base: str) -> str:
+    parts = []
+    for item in value.split(","):
+        bits = item.strip().split()
+        if bits:
+            bits[0] = rewrite_ref(bits[0], base, "asset")
+        parts.append(" ".join(bits))
+    return ", ".join(parts)
+
+
 def process_css(text: str, base_url: str) -> str:
     def repl(match: re.Match[str]) -> str:
         quote = match.group(1) or ""
@@ -111,6 +139,10 @@ def process_css(text: str, base_url: str) -> str:
         absolute = clean_url(raw, base_url)
         if not absolute:
             return match.group(0)
+        normalized = unwrap_image_optimizer(absolute)
+        if normalized is None:
+            return match.group(0)
+        absolute = normalized
         enqueue(absolute, "asset")
         p = urlparse(absolute)
         target = p.path if p.netloc == SOURCE_HOST else local_web_path(absolute)
@@ -138,14 +170,18 @@ def save_response(url: str, kind: str, r: requests.Response) -> None:
                 for attr in attrs:
                     if tag.get(attr):
                         tag[attr] = rewrite_ref(tag[attr], url, "asset")
-                if tag.get("srcset"):
-                    parts = []
-                    for item in tag["srcset"].split(","):
-                        bits = item.strip().split()
-                        if bits:
-                            bits[0] = rewrite_ref(bits[0], url, "asset")
-                        parts.append(" ".join(bits))
-                    tag["srcset"] = ", ".join(parts)
+
+                for set_attr in ("srcset", "imagesrcset"):
+                    if tag.get(set_attr):
+                        tag[set_attr] = rewrite_srcset(tag[set_attr], url)
+
+                # Vinext may emit a bare /_vinext/image src while the usable
+                # original URLs only appear in srcset. Prefer the first static
+                # srcset candidate so GitHub Pages does not need a dynamic image API.
+                if tag_name == "img" and str(tag.get("src", "")).startswith("/_vinext/image") and tag.get("srcset"):
+                    first = tag["srcset"].split(",")[0].strip().split()[0]
+                    if first:
+                        tag["src"] = first
 
         for a in soup.find_all("a", href=True):
             absolute = clean_url(a["href"], url)
