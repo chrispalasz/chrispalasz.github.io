@@ -2,9 +2,6 @@ name: COPY SITE INTO GITHUB
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/copy-site.yml'
 
 permissions:
   contents: write
